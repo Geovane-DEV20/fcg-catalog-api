@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fcg-catalog-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fcg-catalog-api
+  template:
+    metadata:
+      labels:
+        app: fcg-catalog-api
+    spec:
+      containers:
+      - name: fcg-catalog-api
+        image: fcg-catalog-api:latest
+        ports:
+        - containerPort: 8080
