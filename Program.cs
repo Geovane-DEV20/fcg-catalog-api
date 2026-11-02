@@ -56,13 +56,18 @@ builder.Services.AddAuthorization(options =>
 // Injeção de dependências - Repositories
 builder.Services.AddScoped<IJogoRepository, JogoRepository>();
 builder.Services.AddScoped<IPromocaoRepository, PromocaoRepository>();
+builder.Services.AddScoped<IBibliotecaRepository, BibliotecaRepository>();
 
 // Injeção de dependências - Services
 builder.Services.AddScoped<JogoService>();
 builder.Services.AddScoped<PromocaoService>();
+builder.Services.AddScoped<BibliotecaService>();
 
 // Configuração de mensageria (RabbitMQ)
 builder.Services.AddSingleton<IEventPublisher, RabbitMQEventPublisher>();
+
+// Consumer de eventos de pagamento (Background Service)
+builder.Services.AddHostedService<PaymentEventConsumer>();
 
 // Health Checks
 builder.Services.AddHealthChecks()

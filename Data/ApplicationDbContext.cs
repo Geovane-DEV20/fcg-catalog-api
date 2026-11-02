@@ -7,6 +7,7 @@ public sealed class ApplicationDbContext : DbContext
 {
     public DbSet<Jogo> Jogos => Set<Jogo>();
     public DbSet<Promocao> Promocoes => Set<Promocao>();
+    public DbSet<BibliotecaItem> BibliotecaItens => Set<BibliotecaItem>();
 
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
     {
