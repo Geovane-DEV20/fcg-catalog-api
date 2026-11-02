@@ -160,6 +160,56 @@ public sealed class JogoService
         return jogos.Select(j => JogoResponse.DeJogo(j)).ToList();
     }
 
+    /// <summary>
+    /// Inicia uma compra de jogo. Publica OrderPlacedEvent para processamento.
+    /// O jogo NÃO é adicionado à biblioteca até que o pagamento seja aprovado.
+    /// </summary>
+    public async Task<CompraIniciadaResponse> IniciarCompraAsync(Guid jogoId, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var jogo = await _jogoRepository.ObterPorIdAsync(jogoId, cancellationToken);
+
+        if (jogo is null || jogo.Status != StatusJogo.Publicado)
+            throw new RecursoNaoEncontradoException("JOGO_NAO_ENCONTRADO", "Jogo não encontrado ou não está disponível para compra.");
+
+        if (jogo.Preco is null)
+            throw new RegraDeNegocioException("JOGO_SEM_PRECO", "Este jogo não possui preço definido.");
+
+        // Calcular preço efetivo (com promoção se houver)
+        var agora = DateTime.UtcNow;
+        var promocoesVigentes = await _promocaoRepository.ListarVigentesAsync(agora, cancellationToken);
+        var promocao = promocoesVigentes.FirstOrDefault(p => p.JogoIds.Contains(jogo.Id));
+
+        var precoEfetivo = promocao is null
+            ? jogo.Preco.Value
+            : Math.Round(jogo.Preco.Value * (1 - promocao.PercentualDesconto / 100m), 2);
+
+        // Gerar OrderId para rastreio
+        var orderId = Guid.NewGuid();
+
+        // Publicar evento de pedido - o jogo só será adicionado à biblioteca após aprovação do pagamento
+        var orderEvent = new OrderPlacedEvent(
+            OrderId: orderId,
+            UserId: userId,
+            GameId: jogo.Id,
+            GameTitle: jogo.Titulo,
+            Price: precoEfetivo,
+            OcorridoEm: agora);
+
+        await _eventPublisher.PublishAsync(orderEvent);
+
+        _logger.LogInformation(
+            "Compra iniciada - OrderId: {OrderId}, UserId: {UserId}, GameId: {GameId}, Price: {Price}",
+            orderId, userId, jogo.Id, precoEfetivo);
+
+        return new CompraIniciadaResponse(
+            OrderId: orderId,
+            GameId: jogo.Id,
+            GameTitle: jogo.Titulo,
+            Price: precoEfetivo,
+            Status: "PendenteAprovacao",
+            Mensagem: "Compra iniciada com sucesso. Aguardando aprovação do pagamento.");
+    }
+
     private async Task<Jogo> ObterOuFalharAsync(Guid id, CancellationToken cancellationToken) =>
         await _jogoRepository.ObterPorIdAsync(id, cancellationToken)
             ?? throw new RecursoNaoEncontradoException("JOGO_NAO_ENCONTRADO", "Jogo não encontrado.");

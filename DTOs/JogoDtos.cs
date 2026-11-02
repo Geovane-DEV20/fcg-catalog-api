@@ -39,3 +39,14 @@ public sealed record JogoResponse(
 
 /// <summary>DTO para consulta de jogo para aquisição (comunicação entre microsserviços).</summary>
 public sealed record JogoParaAquisicaoResponse(Guid JogoId, bool Publicado, decimal PrecoEfetivo);
+
+// DTOs de Compra/Pedido
+
+/// <summary>Response retornado ao iniciar uma compra.</summary>
+public sealed record CompraIniciadaResponse(
+    Guid OrderId,
+    Guid GameId,
+    string GameTitle,
+    decimal Price,
+    string Status,
+    string Mensagem);

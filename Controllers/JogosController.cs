@@ -140,4 +140,26 @@ public sealed class JogosController : ControllerBase
         var resposta = await _jogoService.ListarTodosAsync(cancellationToken);
         return Ok(resposta);
     }
+
+    /// <summary>
+    /// Inicia uma compra de jogo. Publica OrderPlacedEvent e retorna OrderId para rastreio.
+    /// O jogo NÃO é adicionado à biblioteca antes da aprovação do pagamento.
+    /// </summary>
+    [HttpPost("{id:guid}/comprar")]
+    [Authorize(Policy = "UserOrAdmin")]
+    [ProducesResponseType(typeof(CompraIniciadaResponse), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Comprar(Guid id, CancellationToken cancellationToken)
+    {
+        // Obter UserId do token JWT
+        var userIdClaim = User.FindFirst("sub") ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+        
+        if (userIdClaim is null || !Guid.TryParse(userIdClaim.Value, out var userId))
+            return Unauthorized(new ErrorResponse("Não autorizado", "Usuário não identificado no token.", "USUARIO_NAO_IDENTIFICADO", HttpContext.TraceIdentifier));
+
+        var resposta = await _jogoService.IniciarCompraAsync(id, userId, cancellationToken);
+        return Accepted(resposta);
+    }
 }
