@@ -2,6 +2,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: fcg-catalog-api
+  labels:
+    app: fcg-catalog-api
 spec:
   replicas: 2
   selector:
@@ -17,3 +19,72 @@ spec:
         image: fcg-catalog-api:latest
         ports:
         - containerPort: 8080
+        env:
+        - name: ASPNETCORE_ENVIRONMENT
+          value: "Production"
+        - name: ConnectionStrings__DefaultConnection
+          valueFrom:
+            secretKeyRef:
+              name: fcg-catalog-secrets
+              key: connection-string
+        - name: JwtSettings__SecretKey
+          valueFrom:
+            secretKeyRef:
+              name: fcg-catalog-secrets
+              key: jwt-secret
+        - name: RabbitMQ__HostName
+          valueFrom:
+            configMapKeyRef:
+              name: fcg-catalog-config
+              key: rabbitmq-host
+        - name: RabbitMQ__UserName
+          valueFrom:
+            secretKeyRef:
+              name: fcg-catalog-secrets
+              key: rabbitmq-user
+        - name: RabbitMQ__Password
+          valueFrom:
+            secretKeyRef:
+              name: fcg-catalog-secrets
+              key: rabbitmq-password
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fcg-catalog-config
+data:
+  rabbitmq-host: "rabbitmq-service"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fcg-catalog-secrets
+type: Opaque
+stringData:
+  connection-string: "Server=sqlserver-service;Database=FcgCatalogDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=True"
+  jwt-secret: "sua-chave-secreta-super-segura-com-no-minimo-32-caracteres-para-producao-usar-variavel-de-ambiente"
+  rabbitmq-user: "guest"
+  rabbitmq-password: "guest"
