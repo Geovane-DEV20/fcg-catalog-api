@@ -1,109 +1,34 @@
-using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using FcgCatalogApi.Data;
-using FcgCatalogApi.Repositories;
 using FcgCatalogApi.Services;
-using FcgCatalogApi.Middlewares;
-using FcgCatalogApi.Events;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configuração do DbContext
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
-{
-    // Para desenvolvimento, usando InMemory. Em produção, usar SQL Server ou PostgreSQL
-    options.UseInMemoryDatabase("FcgCatalogDb");
-    
-    // Para SQL Server, descomentar:
-    // options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
-});
-
-// Configuração JWT
-var jwtSettings = builder.Configuration.GetSection("JwtSettings");
-var secretKey = jwtSettings["SecretKey"] ?? throw new InvalidOperationException("JWT SecretKey não configurada");
-var key = Encoding.UTF8.GetBytes(secretKey);
-
-builder.Services.AddAuthentication(options =>
-{
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-})
-.AddJwtBearer(options =>
-{
-    options.RequireHttpsMetadata = false; // Em produção, usar true
-    options.SaveToken = true;
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(key),
-        ValidateIssuer = true,
-        ValidIssuer = jwtSettings["Issuer"],
-        ValidateAudience = true,
-        ValidAudience = jwtSettings["Audience"],
-        ValidateLifetime = true,
-        ClockSkew = TimeSpan.Zero
-    };
-});
-
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy("AdminOnly", policy => policy.RequireRole("Administrador"));
-    options.AddPolicy("UserOrAdmin", policy => policy.RequireRole("Usuario", "Administrador"));
-});
-
-// Injeção de dependências - Repositories
-builder.Services.AddScoped<IJogoRepository, JogoRepository>();
-builder.Services.AddScoped<IPromocaoRepository, PromocaoRepository>();
-builder.Services.AddScoped<IBibliotecaRepository, BibliotecaRepository>();
-
-// Injeção de dependências - Services
-builder.Services.AddScoped<JogoService>();
-builder.Services.AddScoped<PromocaoService>();
-builder.Services.AddScoped<BibliotecaService>();
-
-// Configuração de mensageria (RabbitMQ)
-builder.Services.AddSingleton<IEventPublisher, RabbitMQEventPublisher>();
-
-// Consumer de eventos de pagamento (Background Service)
-builder.Services.AddHostedService<PaymentEventConsumer>();
-
-// Health Checks
-builder.Services.AddHealthChecks()
-    .AddCheck<RabbitMQHealthCheck>("rabbitmq");
-
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(options =>
+builder.Services.AddSwaggerGen(c =>
 {
-    options.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
+    c.SwaggerDoc("v1", new OpenApiInfo { Title = "FCG Catalog API", Version = "v1" });
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
-        Title = "FCG Catalog API",
-        Version = "v1",
-        Description = "API de Catálogo de Jogos - Microsserviço com gerenciamento de jogos e promoções"
-    });
-
-    // Configuração para JWT no Swagger
-    options.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
-    {
-        Description = "JWT Authorization header usando o esquema Bearer. \r\n\r\n" +
-                      "Digite 'Bearer' [espaço] e então seu token no campo abaixo.\r\n\r\n" +
-                      "Exemplo: 'Bearer 12345abcdef'",
+        Description = "JWT Authorization header",
         Name = "Authorization",
-        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-        Type = Microsoft.OpenApi.Models.SecuritySchemeType.ApiKey,
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.ApiKey,
         Scheme = "Bearer"
     });
-
-    options.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
         {
-            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+            new OpenApiSecurityScheme
             {
-                Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                Reference = new OpenApiReference
                 {
-                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
+                    Type = ReferenceType.SecurityScheme,
                     Id = "Bearer"
                 }
             },
@@ -112,10 +37,75 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
+// Database
+builder.Services.AddDbContext<CatalogDbContext>(options =>
+    options.UseInMemoryDatabase("CatalogDb"));
+
+// JWT Authentication
+var jwtSecret = builder.Configuration["Jwt:Secret"] ?? "your-super-secret-key-change-this-in-production-min-32-chars";
+var key = Encoding.ASCII.GetBytes(jwtSecret);
+
+builder.Services.AddAuthentication(x =>
+{
+    x.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    x.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(x =>
+{
+    x.RequireHttpsMetadata = false;
+    x.SaveToken = true;
+    x.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuerSigningKey = true,
+        IssuerSigningKey = new SymmetricSecurityKey(key),
+        ValidateIssuer = false,
+        ValidateAudience = false
+    };
+});
+
+builder.Services.AddAuthorization();
+
+// Services
+builder.Services.AddSingleton<IRabbitMqService, RabbitMqService>();
+builder.Services.AddHostedService<PaymentEventConsumer>();
+
 var app = builder.Build();
 
-// Middleware de tratamento de exceções
-app.UseMiddleware<ExceptionHandlingMiddleware>();
+// Seed some games
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+    if (!db.Games.Any())
+    {
+        db.Games.AddRange(
+            new FcgCatalogApi.Models.Game
+            {
+                Id = Guid.NewGuid(),
+                Titulo = "The Legend of Zelda: Breath of the Wild",
+                Descricao = "Aventura épica em mundo aberto",
+                Genero = "Aventura",
+                Desenvolvedora = "Nintendo",
+                DataLancamento = new DateTime(2017, 3, 3),
+                Preco = 299.90m,
+                Status = "Publicado",
+                CriadoEm = DateTime.UtcNow
+            },
+            new FcgCatalogApi.Models.Game
+            {
+                Id = Guid.NewGuid(),
+                Titulo = "Red Dead Redemption 2",
+                Descricao = "Faroeste de ação e aventura",
+                Genero = "Ação",
+                Desenvolvedora = "Rockstar Games",
+                DataLancamento = new DateTime(2018, 10, 26),
+                Preco = 249.90m,
+                Status = "Publicado",
+                CriadoEm = DateTime.UtcNow
+            }
+        );
+        db.SaveChanges();
+    }
+}
 
 if (app.Environment.IsDevelopment())
 {
@@ -126,11 +116,6 @@ if (app.Environment.IsDevelopment())
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Redirecionar raiz para Swagger
-app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
-
-// Health Check endpoint
-app.MapHealthChecks("/health");
-
 app.MapControllers();
+
 app.Run();
